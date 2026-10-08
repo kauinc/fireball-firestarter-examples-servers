@@ -2,9 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Fireball.Game.Server;
-using Fireball.Game.Server.Models;
-using Fireball.Game.Server.Rng;
+using Fireball.Fireworks;
+using Fireball.Fireworks.Core;
+using Fireball.Fireworks.Models;
+using Fireball.Fireworks.Rng;
 using Microsoft.Extensions.Logging;
 
 namespace SampleProject
@@ -17,13 +18,13 @@ namespace SampleProject
     public class Game : IGame
     {
         private readonly IFireballLogger _logger;
-        private readonly IFireball _fireball;
+        private readonly IFireworks _fireworks;
         private readonly IRng _fireballRng;
 
-        public Game(ILogger<Game> logger, IFireball fireball, IRng fireballRng)
+        public Game(ILogger<Game> logger, IFireworks fireworks, IRng fireballRng)
         {
             _logger = new FireballLogger(nameof(Game), logger);
-            _fireball = fireball;
+            _fireworks = fireworks;
             _fireballRng = fireballRng;
         }
 
@@ -58,14 +59,14 @@ namespace SampleProject
             _logger.Log($"authenticate: {message.ToJson()}");
 
             // send the authenticating message
-            return await _fireball.Authenticate(message);
+            return await _fireworks.Authenticate(message);
         }
         
         private async Task<MessageResult> OnAuthSuccess(SessionMessage message)
         {
             if (message.GameSession != null)
             {
-                var gameSessionsList = await _fireball.GetAllGameSessions(message);
+                var gameSessionsList = await _fireworks.GetAllGameSessions(message);
 
                 foreach (var gameSession in gameSessionsList)
                 {
@@ -75,7 +76,7 @@ namespace SampleProject
                     // close game session with game-over game state
                     if (gameState.IsGameOver)
                     {
-                        bool closed = await _fireball.CloseGameSession(gameSession.Id);
+                        bool closed = await _fireworks.CloseGameSession(gameSession.Id);
                     }
                 }
             }
@@ -86,18 +87,18 @@ namespace SampleProject
                 var defaultGameState = new SampleGameState();
 
                 // create a new permanent game session
-                var gameSession = await _fireball.CreatePermanentGameSession(defaultGameState, message);
+                var gameSession = await _fireworks.CreatePermanentGameSession(defaultGameState, message);
 
                 // update session message with new game session data
                 message.UpdateGameSession(gameSession);
             }
             
-            return await _fireball.SendSessionToClient(message);
+            return await _fireworks.SendSessionToClient(message);
         }
         
         private async Task<MessageResult> OnAuthReject(ErrorMessage error)
         {
-            return await _fireball.SendErrorToClient(error, ErrorCode.Authentication);
+            return await _fireworks.SendErrorToClient(error, ErrorCode.Authentication);
         }
         
         private async Task<MessageResult> MakeSpin(SampleSpinRequest message)
@@ -114,22 +115,22 @@ namespace SampleProject
             var response = new SampleSpinResult(message.GameType, winAmount, message);
 
             // send the response message to the game client
-            return await _fireball.SendMessageToClient(response);
+            return await _fireworks.SendMessageToClient(response);
         }
         
         private async Task TestGameState(BaseMessage message)
         {
-            var gameState = await _fireball.GetGameState<SampleGameState>(message.GameSession);
+            var gameState = await _fireworks.GetGameState<SampleGameState>(message.GameSession);
             
             // update game state fields
             gameState.CurrentScore = 123;
             gameState.GameBoard.Add("row_1", 5);
 
             // save updated game state into game session
-            await _fireball.SaveGameState<SampleGameState>(message.GameSession, gameState);
+            await _fireworks.SaveGameState<SampleGameState>(message.GameSession, gameState);
             
             // update number field directly
-            await _fireball.UpdateGameState(message.GameSession, "$.CurrentScore", 456);
+            await _fireworks.UpdateGameState(message.GameSession, "$.CurrentScore", 456);
 
             // update the dictionary object
             var gameBoard = new Dictionary<string, int>()
@@ -137,7 +138,7 @@ namespace SampleProject
                 { "row_1", 1 },
                 { "row_2", 2 },
             };
-            await _fireball.UpdateGameState(message.GameSession, "$.GameBoard", gameBoard);
+            await _fireworks.UpdateGameState(message.GameSession, "$.GameBoard", gameBoard);
         }
     }
 }

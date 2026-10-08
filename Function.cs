@@ -2,8 +2,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using CloudNative.CloudEvents;
-using Fireball.Game.Server;
-using Fireball.Game.Server.Models;
+using Fireball.Fireworks;
+using Fireball.Fireworks.Core;
+using Fireball.Fireworks.Models;
 using Google.Cloud.Functions.Framework;
 using Google.Cloud.Functions.Hosting;
 using Google.Events.Protobuf.Cloud.PubSub.V1;
@@ -17,7 +18,7 @@ namespace SampleProject
     {
         public override void ConfigureServices(WebHostBuilderContext context, IServiceCollection services)
         {
-            services.AddFireballDependencies();
+            services.AddFireworks();
             services.AddSingleton<IGame, Game>();
 
             base.ConfigureServices(context, services);
@@ -28,13 +29,13 @@ namespace SampleProject
     public class Function : ICloudEventFunction<MessagePublishedData>
     {
         private readonly IFireballLogger _logger;
-        private readonly IFireball _fireball;
+        private readonly IFireworks _fireworks;
         private readonly IGame _game;
 
-        public Function(ILogger<Function> logger, IFireball fireball, IGame game)
+        public Function(ILogger<Function> logger, IFireworks fireworks, IGame game)
         {
             _logger = new FireballLogger(nameof(Function), logger); ;
-            _fireball = fireball;
+            _fireworks = fireworks;
             _game = game;
         }
 
@@ -45,7 +46,7 @@ namespace SampleProject
                 FireballLogger.LogLevel = LogLevel.Debug;
                 
                 string messageJson = data.Message?.TextData;
-                ParseResult result = await _fireball.ParseMessage(messageJson);
+                ParseResult result = await _fireworks.ParseMessage(messageJson);
                 MessageResult messageResult = await _game.HandleMessage(result);
                 _logger.Log($"Result: {messageResult?.Message}");
             }

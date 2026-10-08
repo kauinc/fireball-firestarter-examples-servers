@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using Fireball.Game.Server.Models;
+using Fireball.Fireworks.Models;
 
 namespace SampleProject
 {
