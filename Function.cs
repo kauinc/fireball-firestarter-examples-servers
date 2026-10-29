@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace SampleProject
+namespace SlotsSample
 {
     public class Startup : FunctionsStartup
     {
@@ -48,7 +48,14 @@ namespace SampleProject
                 string messageJson = data.Message?.TextData;
                 ParseResult result = await _fireworks.ParseMessage(messageJson);
                 MessageResult messageResult = await _game.HandleMessage(result);
-                _logger.Log($"Result: {messageResult?.Message}");
+                if (messageResult != null && messageResult.IsError())
+                {
+                    _logger.LogError($"Result: {messageResult?.Message}");
+                }
+                else
+                {
+                    _logger.Log($"Result: {messageResult?.Message}");
+                }
             }
             catch (Exception ex)
             {

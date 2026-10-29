@@ -1,37 +1,38 @@
 ﻿using System.Collections.Generic;
 using Fireball.Fireworks.Models;
 
-namespace SampleProject
+namespace SlotsSample
 {
-    public class GameMessages
+    public static class GameMessages
     {
         public const string SPIN_REQUEST = "spin-request";
         public const string SPIN_RESULT = "spin-result";
     }
     
-    public class SampleSpinRequest : BaseMessage
+    public class SpinRequest : BaseMessage
     {
-        public string GameType;
         public long BetAmount;
 
-        public SampleSpinRequest()
+        public SpinRequest()
         {
             Name = GameMessages.SPIN_REQUEST;
         }
     }
 
-    public class SampleSpinResult : BaseMessage
+    public class SpinResult : BaseMessage
     {
-        public string GameType;
+        public Symbol[] Symbols;
         public long WinAmount;
-
-        public SampleSpinResult(string gameType, long winAmount, BaseMessage baseMessage)
+        public long Balance;
+        
+        public SpinResult(SlotsGameState gameState, BaseMessage baseMessage)
         {
             CopyBaseParams(baseMessage);
 
             Name = GameMessages.SPIN_RESULT;
-            GameType = gameType;
-            WinAmount = winAmount;
+            Symbols = gameState.Symbols;
+            WinAmount = gameState.WinAmount;
+            Balance = gameState.Balance;
         }
     }
 }
