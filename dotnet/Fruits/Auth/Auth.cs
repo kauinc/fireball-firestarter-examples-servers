@@ -11,6 +11,7 @@ namespace SlotsSample
         Task<MessageResult> TryAuth(AuthMessage message);
         Task<MessageResult> OnAuthSuccess(SessionMessage message);
         Task<MessageResult> OnAuthReject(ErrorMessage error);
+        Task<MessageResult> OnDisconnected(BaseMessage message);
     }
     
     public class Auth : IAuth
@@ -74,6 +75,12 @@ namespace SlotsSample
         {
             _logger.LogError($"authentication rejected: {error.ToJson()}");
             return await _fireworks.SendErrorToClient(error, ErrorCode.Authentication);
+        }
+
+        public async Task<MessageResult> OnDisconnected(BaseMessage message)
+        {
+            _logger.Log($"disconnected: {message.ToJson()}");
+            return MessageResult.SuccessResult("successfully disconnected", message.ActionId);
         }
     }
 }

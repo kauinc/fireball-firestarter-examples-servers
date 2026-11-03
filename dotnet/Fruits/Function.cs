@@ -79,6 +79,8 @@ namespace SlotsSample
                         return await _auth.OnAuthSuccess(result.ToMessage<SessionMessage>());
                     case FireballConstants.MessagesNames.AUTHENTICATE_REJECT:
                         return await _auth.OnAuthReject(result.ToMessage<ErrorMessage>());
+                    case FireballConstants.MessagesNames.DISCONNECTED:
+                        return await _auth.OnDisconnected(result.ToMessage<BaseMessage>());
                     
                     case GameMessages.SPIN_REQUEST:
                         return await _slots.TrySpin(result.ToMessage<SpinRequest>());
