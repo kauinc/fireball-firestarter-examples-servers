@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace SlotsSample
+namespace FruitsSample
 {
     public static class GameMessages
     {

@@ -1,13 +1,14 @@
 using Fireball.Fireworks.Models;
 
-namespace SlotsSample;
-
-public class SpinRequest : BaseMessage
+namespace FruitsSample
 {
-    public long BetAmount;
-
-    public SpinRequest()
+    public class SpinRequest : BaseMessage
     {
-        Name = GameMessages.SPIN_REQUEST;
+        public long BetAmount;
+
+        public SpinRequest()
+        {
+            Name = GameMessages.SPIN_REQUEST;
+        }
     }
 }

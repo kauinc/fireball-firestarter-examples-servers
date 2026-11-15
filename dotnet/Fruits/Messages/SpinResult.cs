@@ -1,20 +1,21 @@
 using Fireball.Fireworks.Models;
 
-namespace SlotsSample;
-
-public class SpinResult : BaseMessage
+namespace FruitsSample
 {
-    public Symbol[] Symbols;
-    public long WinAmount;
-    public long Balance;
-        
-    public SpinResult(SlotsGameState gameState, BaseMessage baseMessage)
+    public class SpinResult : BaseMessage
     {
-        CopyBaseParams(baseMessage);
+        public Symbol[] Symbols;
+        public long WinAmount;
+        public long Balance;
 
-        Name = GameMessages.SPIN_RESULT;
-        Symbols = gameState.Symbols;
-        WinAmount = gameState.WinAmount;
-        Balance = gameState.Balance;
+        public SpinResult(SlotsGameState gameState, BaseMessage baseMessage)
+        {
+            CopyBaseParams(baseMessage);
+
+            Name = GameMessages.SPIN_RESULT;
+            Symbols = gameState.Symbols;
+            WinAmount = gameState.WinAmount;
+            Balance = gameState.Balance;
+        }
     }
 }
