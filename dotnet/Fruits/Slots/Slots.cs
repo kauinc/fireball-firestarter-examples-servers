@@ -8,7 +8,7 @@ using Fireball.Fireworks.Models;
 using Fireball.Fireworks.Rng;
 using Microsoft.Extensions.Logging;
 
-namespace SlotsSample
+namespace FruitsSample
 {
     public interface ISlots
     {
@@ -24,8 +24,7 @@ namespace SlotsSample
         private readonly IFireballLogger _logger;
         private readonly IFireworks _fireworks;
         private readonly IRng _fireballRng;
-
-
+        
         public Slots(ILogger<Slots> logger, IFireworks fireworks, IRng fireballRng)
         {
             _logger = new FireballLogger(nameof(Slots), logger);

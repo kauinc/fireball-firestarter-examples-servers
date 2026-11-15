@@ -4,7 +4,7 @@ using Fireball.Fireworks.Core;
 using Fireball.Fireworks.Models;
 using Microsoft.Extensions.Logging;
 
-namespace SlotsSample
+namespace FruitsSample
 {
     public interface IAuth
     {
@@ -21,7 +21,7 @@ namespace SlotsSample
 
         public Auth(ILogger<Slots> logger, IFireworks fireworks)
         {
-            _logger = new FireballLogger(nameof(Slots), logger);
+            _logger = new FireballLogger(nameof(Auth), logger);
             _fireworks = fireworks;
         }
 
