@@ -13,6 +13,10 @@ namespace DoofTroop.Cancel
     public interface ICancelHandler
     {
         Task<MessageResult> CancelRound(CancelRoundRequest message);
+        /// <summary>
+        /// Build a cancel request from another game message (settle/lock dual-trigger).
+        /// </summary>
+        Task<MessageResult> CancelRoundFrom(BaseMessage source, string roundId);
     }
 
     public class CancelHandler : ICancelHandler
@@ -29,6 +33,15 @@ namespace DoofTroop.Cancel
             _logger = new FireballLogger(nameof(CancelHandler), logger);
             _fireworks = fireworks;
             _rounds = rounds;
+        }
+
+        public Task<MessageResult> CancelRoundFrom(BaseMessage source, string roundId)
+        {
+            var request = new CancelRoundRequest();
+            request.CopyBaseParams(source);
+            request.Name = Constants.Messages.CancelRound;
+            request.RoundId = roundId;
+            return CancelRound(request);
         }
 
         public async Task<MessageResult> CancelRound(CancelRoundRequest message)

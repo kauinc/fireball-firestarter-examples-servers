@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using DoofTroop.Betting;
+using DoofTroop.Cancel;
 using DoofTroop.Lock;
 using DoofTroop.Messages;
 using DoofTroop.Paytable;
@@ -28,19 +29,22 @@ namespace DoofTroop.Settlement
         private readonly ISupabaseRoundsClient _rounds;
         private readonly IPaytableService _paytable;
         private readonly ILockHandler _lockHandler;
+        private readonly ICancelHandler _cancel;
 
         public SettlementHandler(
             ILogger<SettlementHandler> logger,
             IFireworks fireworks,
             ISupabaseRoundsClient rounds,
             IPaytableService paytable,
-            ILockHandler lockHandler)
+            ILockHandler lockHandler,
+            ICancelHandler cancel)
         {
             _logger = new FireballLogger(nameof(SettlementHandler), logger);
             _fireworks = fireworks;
             _rounds = rounds;
             _paytable = paytable;
             _lockHandler = lockHandler;
+            _cancel = cancel;
         }
 
         public async Task<MessageResult> SettleRound(SettleRoundRequest message)
@@ -58,13 +62,25 @@ namespace DoofTroop.Settlement
             {
                 _logger.Log($"Idempotent settle replay for round {message.RoundId}");
                 return await _fireworks.SendMessageToClient(
-                    new SettleResultResponse(message, state.LastSettlement, state.WalletPhase));
+                    new SettleResultResponse(
+                        message,
+                        state.LastSettlement,
+                        state.WalletPhase,
+                        state.Balance));
             }
 
             if (state.WalletPhase == Constants.WalletPhase.Rejected
                 && state.CurrentRoundId == message.RoundId)
             {
                 return await Reject(message, "No locked bets — place-bet was rejected.");
+            }
+
+            // Early cancel dual-trigger: never settle a cancelled round.
+            var earlyRound = await _rounds.GetRoundByIdAsync(message.RoundId);
+            if (earlyRound != null && earlyRound.IsCancelled())
+            {
+                _logger.Log($"Settle on CANCELLED round={message.RoundId}; routing to cancel.");
+                return await _cancel.CancelRoundFrom(message, message.RoundId);
             }
 
             // Dual-trigger: lock if not yet locked.
@@ -106,7 +122,8 @@ namespace DoofTroop.Settlement
 
             if (round.IsCancelled())
             {
-                return await Reject(message, "Round is cancelled; use cancel-round.");
+                _logger.Log($"Settle on CANCELLED round={message.RoundId}; routing to cancel.");
+                return await _cancel.CancelRoundFrom(message, message.RoundId);
             }
 
             if (!round.HasPodiumSignal())
@@ -170,7 +187,11 @@ namespace DoofTroop.Settlement
 
             await _fireworks.SaveGameState(message.GameSession, state);
             return await _fireworks.SendMessageToClient(
-                new SettleResultResponse(message, settlement, state.WalletPhase));
+                new SettleResultResponse(
+                    message,
+                    settlement,
+                    state.WalletPhase,
+                    state.Balance));
         }
 
         public async Task<MessageResult> OnWinConfirmed(IntegrationWinningPaid message)
