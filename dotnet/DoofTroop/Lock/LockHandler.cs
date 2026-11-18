@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using DoofTroop.Betting;
+using DoofTroop.Cancel;
 using DoofTroop.Messages;
 using DoofTroop.Supabase;
 using Fireball.Fireworks;
@@ -25,15 +26,18 @@ namespace DoofTroop.Lock
         private readonly IFireballLogger _logger;
         private readonly IFireworks _fireworks;
         private readonly ISupabaseRoundsClient _rounds;
+        private readonly ICancelHandler _cancel;
 
         public LockHandler(
             ILogger<LockHandler> logger,
             IFireworks fireworks,
-            ISupabaseRoundsClient rounds)
+            ISupabaseRoundsClient rounds,
+            ICancelHandler cancel)
         {
             _logger = new FireballLogger(nameof(LockHandler), logger);
             _fireworks = fireworks;
             _rounds = rounds;
+            _cancel = cancel;
         }
 
         public async Task<MessageResult> LockBets(LockBetsRequest message)
@@ -54,6 +58,13 @@ namespace DoofTroop.Lock
                 && state.WalletPhase == Constants.WalletPhase.Locked
                 && state.LockedBets?.Count > 0)
             {
+                var lockedRound = await _rounds.GetRoundByIdAsync(roundId);
+                if (lockedRound != null && lockedRound.IsCancelled())
+                {
+                    _logger.Log($"Lock on CANCELLED locked round={roundId}; routing to cancel.");
+                    return await _cancel.CancelRoundFrom(message, roundId);
+                }
+
                 return await _fireworks.SendMessageToClient(new BetsLockedResponse(message, state));
             }
 
@@ -85,7 +96,8 @@ namespace DoofTroop.Lock
 
             if (round.IsCancelled())
             {
-                return await Reject(message, "Round is cancelled.");
+                _logger.Log($"Lock on CANCELLED round={roundId}; routing to cancel.");
+                return await _cancel.CancelRoundFrom(message, roundId);
             }
 
             if (round.IsBettingOpen())
@@ -168,9 +180,18 @@ namespace DoofTroop.Lock
             state.OperatorBetId = null;
             state.FireworksRoundId = null;
             state.UndoStack = new List<UndoSnapshot>();
+            if (message.Balance.HasValue)
+            {
+                state.Balance = message.Balance.Value;
+            }
 
             await _fireworks.SaveGameState(message.GameSession, state);
-            return await _fireworks.SendErrorToClient(message);
+            return await _fireworks.SendErrorToClient(
+                new ErrorMessage(
+                    Constants.Messages.BetsRejected,
+                    message.Code,
+                    message.Reason ?? "Bet placement rejected.",
+                    message));
         }
 
         private async Task<MessageResult> Reject(BaseMessage message, string text)

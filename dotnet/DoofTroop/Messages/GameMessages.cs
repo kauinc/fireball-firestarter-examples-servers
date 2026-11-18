@@ -106,6 +106,8 @@ namespace DoofTroop.Messages
         public decimal TotalStake;
         public string OperatorBetId;
         public string WalletPhase;
+        /// <summary>Absolute wallet balance in cents (Fruits/Ares pattern).</summary>
+        public long Balance;
 
         public BetsLockedResponse(BaseMessage source, GameState state)
         {
@@ -116,6 +118,7 @@ namespace DoofTroop.Messages
             TotalStake = BetMath.FromCents(state.LockedStakeCents);
             OperatorBetId = state.OperatorBetId;
             WalletPhase = state.WalletPhase;
+            Balance = state.Balance;
         }
     }
 
@@ -123,13 +126,20 @@ namespace DoofTroop.Messages
     {
         public SettlementResult Settlement;
         public string WalletPhase;
+        /// <summary>Absolute wallet balance in cents after applying the win.</summary>
+        public long Balance;
 
-        public SettleResultResponse(BaseMessage source, SettlementResult settlement, string walletPhase)
+        public SettleResultResponse(
+            BaseMessage source,
+            SettlementResult settlement,
+            string walletPhase,
+            long balance)
         {
             CopyBaseParams(source);
             Name = Constants.Messages.SettleResult;
             Settlement = settlement;
             WalletPhase = walletPhase;
+            Balance = balance;
         }
     }
 
@@ -138,6 +148,8 @@ namespace DoofTroop.Messages
         public string RoundId;
         public string WalletPhase;
         public decimal RefundedStake;
+        /// <summary>Absolute wallet balance in cents after refund.</summary>
+        public long Balance;
 
         public RefundResultResponse(BaseMessage source, GameState state, decimal refundedStake)
         {
@@ -146,6 +158,7 @@ namespace DoofTroop.Messages
             RoundId = state.CurrentRoundId;
             WalletPhase = state.WalletPhase;
             RefundedStake = refundedStake;
+            Balance = state.Balance;
         }
     }
 }
