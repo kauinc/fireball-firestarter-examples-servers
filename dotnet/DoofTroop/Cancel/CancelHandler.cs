@@ -68,7 +68,10 @@ namespace DoofTroop.Cancel
                 && state.WalletPhase == Constants.WalletPhase.Refunded)
             {
                 return await _fireworks.SendMessageToClient(
-                    new RefundResultResponse(message, state, BetMath.FromCents(state.LockedStakeCents)));
+                    new RefundResultResponse(
+                        message,
+                        state,
+                        BetMode.FromRgsAmount(message, state.LockedStakeCents)));
             }
 
             if (state.CurrentRoundId == message.RoundId
@@ -142,7 +145,10 @@ namespace DoofTroop.Cancel
 
             await _fireworks.SaveGameState(message.GameSession, state);
             return await _fireworks.SendMessageToClient(
-                new RefundResultResponse(message, state, BetMath.FromCents(refundCents)));
+                new RefundResultResponse(
+                    message,
+                    state,
+                    BetMode.FromRgsAmount(message, refundCents)));
         }
 
         private async Task<MessageResult> Reject(BaseMessage message, string text)

@@ -82,6 +82,8 @@ namespace DoofTroop
         };
 
         public const decimal MaxBetPerTarget = 100m;
+        /// <summary>Max stake per target in coin units (coins mode).</summary>
+        public const decimal MaxBetPerTargetCoins = 10000m;
         public const int MaxUndo = 40;
         public const string DefaultChannelId = "43fa047a-dfe0-45a3-a093-2cb11cc29b55";
         public const string DefaultSupabaseUrl = "https://xypxrqyecjeiftuqppeu.supabase.co";

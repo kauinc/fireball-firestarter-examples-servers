@@ -115,7 +115,9 @@ namespace DoofTroop.Messages
             Name = Constants.Messages.BetsLocked;
             RoundId = state.CurrentRoundId;
             Bets = state.LockedBets;
-            TotalStake = BetMath.FromCents(state.LockedStakeCents);
+            TotalStake = BetMode.FromRgsAmount(
+                BetMode.IsCoins(state.GameMode, state.Currency),
+                state.LockedStakeCents);
             OperatorBetId = state.OperatorBetId;
             WalletPhase = state.WalletPhase;
             Balance = state.Balance;
