@@ -54,6 +54,7 @@ namespace DoofTroop.Auth
                 {
                     Balance = message.Balance,
                     Currency = message.Currency,
+                    GameMode = message.GameMode,
                     WalletPhase = Constants.WalletPhase.Idle
                 };
 

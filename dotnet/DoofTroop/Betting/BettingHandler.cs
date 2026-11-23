@@ -50,7 +50,7 @@ namespace DoofTroop.Betting
                 return await Reject(message, "Missing bet target.");
             }
 
-            if (!BetMath.IsAllowedChipValue(message.ChipValue) || message.ChipValue <= 0)
+            if (!BetMode.IsAllowedChipValue(message, message.ChipValue))
             {
                 return await Reject(message, "Invalid chip value.");
             }
@@ -90,10 +90,11 @@ namespace DoofTroop.Betting
                 ? Constants.Places.All.ToList()
                 : existing.Chips.SelectMany(c => BetMath.PositionsForMetal(c.Metal)).Distinct().ToList();
 
-            if (BetMath.StackTotal(existing.Chips) > Constants.MaxBetPerTarget)
+            var maxPerTarget = BetMode.MaxBetPerTarget(message);
+            if (BetMath.StackTotal(existing.Chips) > maxPerTarget)
             {
                 state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
-                return await Reject(message, $"Max bet per target is {Constants.MaxBetPerTarget}.");
+                return await Reject(message, $"Max bet per target is {maxPerTarget}.");
             }
 
             MarkPending(state, message.RoundId);
@@ -163,10 +164,11 @@ namespace DoofTroop.Betting
                         Count = c.Count
                     }));
 
-                if (BetMath.StackTotal(bet.Chips) > Constants.MaxBetPerTarget)
+                var maxDouble = BetMode.MaxBetPerTarget(message);
+                if (BetMath.StackTotal(bet.Chips) > maxDouble)
                 {
                     state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
-                    return await Reject(message, $"Doubling would exceed max bet {Constants.MaxBetPerTarget}.");
+                    return await Reject(message, $"Doubling would exceed max bet {maxDouble}.");
                 }
             }
 
@@ -193,7 +195,7 @@ namespace DoofTroop.Betting
                 return clone;
             }).ToList();
 
-            if (state.PendingBets.Any(b => BetMath.StackTotal(b.Chips) > Constants.MaxBetPerTarget))
+            if (state.PendingBets.Any(b => BetMath.StackTotal(b.Chips) > BetMode.MaxBetPerTarget(message)))
             {
                 state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
                 return await Reject(message, "Repeated bets exceed max per target.");
@@ -277,7 +279,7 @@ namespace DoofTroop.Betting
             if (message.ComboPick != null) state.ComboPick = message.ComboPick;
             if (message.CrazyComboPicks != null) state.CrazyComboPicks = message.CrazyComboPicks;
 
-            if (state.PendingBets.Any(b => BetMath.StackTotal(b.Chips) > Constants.MaxBetPerTarget))
+            if (state.PendingBets.Any(b => BetMath.StackTotal(b.Chips) > BetMode.MaxBetPerTarget(message)))
             {
                 state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
                 return await Reject(message, "Carry-forward exceeds max bet per target.");

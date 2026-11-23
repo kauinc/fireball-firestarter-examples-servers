@@ -84,7 +84,8 @@ namespace DoofTroop.Betting
         };
 
         public static bool IsAllowedChipValue(decimal value) =>
-            Constants.ChipValues.Any(v => v == value);
+            Constants.ChipValues.Any(v => v == value)
+            || BetMode.DefaultCoinChips.Any(v => v == value);
 
         public static bool IsCrazyComboComplete(Dictionary<string, CrazyComboSlot> picks) =>
             picks != null && Constants.Places.All.All(p => picks.ContainsKey(p) && picks[p] != null);

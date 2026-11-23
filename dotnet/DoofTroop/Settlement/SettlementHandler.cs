@@ -161,20 +161,21 @@ namespace DoofTroop.Settlement
             settlement.RoundId = message.RoundId;
             settlement.OfficialPlacements = official.ToArray();
 
-            var winCents = BetMath.ToCents(settlement.TotalWin);
+            var winRgs = BetMode.ToRgsAmount(message, settlement.TotalWin);
 
             state.LastSettlement = settlement;
             state.LastActionId = message.ActionId;
             state.RoundStatusSnapshot = round.Status;
             state.TestMoneyOnly = round.TestMoneyOnly;
+            state.GameMode = message.GameMode ?? state.GameMode;
             // Mark settled after PayWin request is accepted path — store intent first.
             await _fireworks.SaveGameState(message.GameSession, state);
 
-            _logger.Log($"PayWin round={message.RoundId} winCents={winCents}");
+            _logger.Log($"PayWin round={message.RoundId} winRgs={winRgs} mode={message.GameMode}");
             await _fireworks.PayWin(
                 FireballConstants.WinningType.SPIN,
                 state.OperatorBetId,
-                winCents,
+                winRgs,
                 message);
 
             state.WalletPhase = Constants.WalletPhase.Settled;
@@ -183,7 +184,7 @@ namespace DoofTroop.Settlement
                 .Where(b => settlement.ById.TryGetValue(b.Id, out var o) && o.Won)
                 .Select(BetMath.CloneBet)
                 .ToList();
-            state.Balance += winCents;
+            state.Balance += winRgs;
 
             await _fireworks.SaveGameState(message.GameSession, state);
             return await _fireworks.SendMessageToClient(

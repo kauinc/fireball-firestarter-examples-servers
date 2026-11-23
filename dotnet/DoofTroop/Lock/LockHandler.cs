@@ -124,8 +124,8 @@ namespace DoofTroop.Lock
             }
 
             var totalStake = BetMath.BetsStakeTotal(pending);
-            var stakeCents = BetMath.ToCents(totalStake);
-            if (stakeCents <= 0)
+            var stakeRgs = BetMode.ToRgsAmount(message, totalStake);
+            if (stakeRgs <= 0)
             {
                 return await Reject(message, "Total stake must be positive.");
             }
@@ -136,13 +136,14 @@ namespace DoofTroop.Lock
             state.WalletPhase = Constants.WalletPhase.Locking;
             state.LastActionId = message.ActionId;
             state.LockedBets = BetMath.CloneBets(pending);
-            state.LockedStakeCents = stakeCents;
+            state.LockedStakeCents = stakeRgs;
             state.Currency = message.Currency ?? state.Currency;
+            state.GameMode = message.GameMode ?? state.GameMode;
 
             await _fireworks.SaveGameState(message.GameSession, state);
 
-            _logger.Log($"PlaceBet round={roundId} stakeCents={stakeCents}");
-            return await _fireworks.PlaceBet(FireballConstants.BetType.SPIN, stakeCents, message);
+            _logger.Log($"PlaceBet round={roundId} stakeRgs={stakeRgs} mode={message.GameMode}");
+            return await _fireworks.PlaceBet(FireballConstants.BetType.SPIN, stakeRgs, message);
         }
 
         public async Task<MessageResult> OnBetPlaced(IntegrationBetPlaced message)

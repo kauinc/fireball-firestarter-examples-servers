@@ -25,6 +25,7 @@ namespace DoofTroop
         public string LastActionId;
         public long LockedStakeCents;
         public string Currency;
+        public string GameMode;
         public long Balance;
 
         public SettlementResult LastSettlement;
