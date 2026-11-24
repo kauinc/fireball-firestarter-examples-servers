@@ -138,12 +138,18 @@ namespace DoofTroop.Cancel
 
             state.WalletPhase = Constants.WalletPhase.Refunded;
             state.Balance += refundCents;
+            // Keep board in LastRoundBets so RGS replay still shows the cancelled stake.
+            state.LastRoundBets = BetMath.CloneBets(state.LockedBets);
             state.PendingBets = new List<PlayerBet>();
             state.LockedBets = new List<PlayerBet>();
             state.LastActionId = message.ActionId;
             state.RoundStatusSnapshot = round.Status;
 
-            await _fireworks.SaveGameState(message.GameSession, state);
+            await ReplayPersistence.SaveAsync(
+                _fireworks,
+                message.GameSession,
+                state,
+                message.ReplayId);
             return await _fireworks.SendMessageToClient(
                 new RefundResultResponse(
                     message,

@@ -160,6 +160,10 @@ namespace DoofTroop.Lock
             state.WalletPhase = Constants.WalletPhase.Locked;
             state.OperatorBetId = message.OperatorBetId;
             state.FireworksRoundId = message.RoundId?.ToString() ?? state.FireworksRoundId;
+            if (!string.IsNullOrEmpty(message.ReplayId))
+            {
+                state.LastReplayId = message.ReplayId;
+            }
             state.Balance = message.Balance;
             state.Currency = message.Currency ?? state.Currency;
             state.PendingBets = new List<PlayerBet>();
