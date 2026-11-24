@@ -194,7 +194,11 @@ namespace DoofTroop.Settlement
                 .ToList();
             state.Balance += winRgs;
 
-            await _fireworks.SaveGameState(message.GameSession, state);
+            await ReplayPersistence.SaveAsync(
+                _fireworks,
+                message.GameSession,
+                state,
+                message.ReplayId);
             return await _fireworks.SendMessageToClient(
                 new SettleResultResponse(
                     message,
@@ -208,7 +212,11 @@ namespace DoofTroop.Settlement
             _logger.Log($"winning-paid: {message.ToJson()}");
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
             state.Balance = message.Balance;
-            await _fireworks.SaveGameState(message.GameSession, state);
+            await ReplayPersistence.SaveAsync(
+                _fireworks,
+                message.GameSession,
+                state,
+                message.ReplayId);
             return MessageResult.SuccessResult("Win confirmed", message.ActionId);
         }
 

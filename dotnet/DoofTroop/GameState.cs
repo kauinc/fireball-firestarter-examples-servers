@@ -22,6 +22,8 @@ namespace DoofTroop
         public string WalletPhase = Constants.WalletPhase.Idle;
         public string OperatorBetId;
         public string FireworksRoundId;
+        /// <summary>RGS replay id from PlaceBet / win-paid; used by SaveGameStateForReplay.</summary>
+        public string LastReplayId;
         public string LastActionId;
         public long LockedStakeCents;
         public string Currency;
