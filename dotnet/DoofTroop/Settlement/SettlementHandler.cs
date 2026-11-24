@@ -162,6 +162,14 @@ namespace DoofTroop.Settlement
             settlement.OfficialPlacements = official.ToArray();
 
             var winRgs = BetMode.ToRgsAmount(message, settlement.TotalWin);
+            var (cappedWin, wasCapped) = BetMode.ApplyExposureCap(message, winRgs);
+            if (wasCapped)
+            {
+                _logger.LogWarning(
+                    $"MaxExposure capped round={message.RoundId} winRgs={winRgs} -> {cappedWin} currency={message.Currency}");
+                winRgs = cappedWin;
+                settlement.TotalWin = BetMode.FromRgsAmount(message, winRgs);
+            }
 
             state.LastSettlement = settlement;
             state.LastActionId = message.ActionId;
