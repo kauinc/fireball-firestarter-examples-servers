@@ -223,7 +223,13 @@ namespace DoofTroop.Settlement
         public async Task<MessageResult> OnWinRejected(ErrorMessage message)
         {
             _logger.LogError($"winning-pay-rejected: {message.ToJson()}");
-            return MessageResult.ErrorResult("Win pay rejected", message.ActionId);
+            const string messageText = "Win pay was rejected.";
+            return await _fireworks.SendErrorToClient(
+                new ErrorMessage(
+                    FireballConstants.MessagesNames.WINNING_PAY_REJECTED,
+                    ErrorCode.InGame,
+                    messageText,
+                    message));
         }
 
         private async Task<MessageResult> Reject(BaseMessage message, string text)
