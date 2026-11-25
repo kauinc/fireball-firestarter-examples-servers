@@ -21,6 +21,7 @@ namespace DoofTroop
     public class Game : IGame
     {
         private readonly IFireballLogger _logger;
+        private readonly IFireworks _fireworks;
         private readonly IAuth _auth;
         private readonly IBettingHandler _betting;
         private readonly ILockHandler _lockHandler;
@@ -29,6 +30,7 @@ namespace DoofTroop
 
         public Game(
             ILogger<Game> logger,
+            IFireworks fireworks,
             IAuth auth,
             IBettingHandler betting,
             ILockHandler lockHandler,
@@ -36,6 +38,7 @@ namespace DoofTroop
             ICancelHandler cancel)
         {
             _logger = new FireballLogger(nameof(Game), logger);
+            _fireworks = fireworks;
             _auth = auth;
             _betting = betting;
             _lockHandler = lockHandler;
@@ -98,6 +101,13 @@ namespace DoofTroop
 
                 case Constants.Messages.CancelRound:
                     return await _cancel.CancelRound(result.ToMessage<CancelRoundRequest>());
+
+                case FireballConstants.MessagesNames.ERROR:
+                {
+                    var error = result.ToMessage<ErrorMessage>();
+                    _logger.LogError($"error: {error.ToJson()}");
+                    return await _fireworks.SendErrorToClient(error);
+                }
 
                 default:
                     return MessageResult.ErrorResult($"Undefined message with name = {result.MessageName}");
