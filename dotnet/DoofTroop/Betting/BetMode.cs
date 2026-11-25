@@ -65,14 +65,7 @@ namespace DoofTroop.Betting
                 return 0;
             }
 
-            var clientVars = message?.GetClientVariables<ClientVars>();
-            if (clientVars?.core_currency_rates != null
-                && clientVars.core_currency_rates.TryGetValue(currency, out var clientRate)
-                && clientRate > 0)
-            {
-                return clientRate;
-            }
-
+            // Server-vars only — never trust client_vars for exposure (cap bypass).
             var serverVars = message?.GetServerVariables<ServerVars>();
             if (serverVars?.core_currency_rates != null
                 && serverVars.core_currency_rates.TryGetValue(currency, out var serverRate)

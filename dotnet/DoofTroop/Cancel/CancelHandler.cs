@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using DoofTroop.Auth;
 using DoofTroop.Betting;
 using DoofTroop.Messages;
 using DoofTroop.Supabase;
@@ -57,12 +59,23 @@ namespace DoofTroop.Cancel
                 return await Reject(message, "Round not found.");
             }
 
+            var channelError = RoundAccess.ValidateChannel(round);
+            if (channelError != null)
+            {
+                return await Reject(message, channelError);
+            }
+
             if (!round.IsCancelled())
             {
                 return await Reject(message, "Supabase round is not CANCELLED.");
             }
 
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            var bindError = SessionGuard.ValidateAndApply(state, message);
+            if (bindError != null)
+            {
+                return await Reject(message, bindError);
+            }
 
             if (state.CurrentRoundId == message.RoundId
                 && state.WalletPhase == Constants.WalletPhase.Refunded)
@@ -75,9 +88,27 @@ namespace DoofTroop.Cancel
             }
 
             if (state.CurrentRoundId == message.RoundId
+                && state.WalletPhase == Constants.WalletPhase.Refunding)
+            {
+                if (!string.IsNullOrEmpty(state.SettleActionId)
+                    && state.SettleActionId != message.ActionId)
+                {
+                    return await Reject(message, "Refund already in progress.");
+                }
+
+                return await CompleteRefundingAsync(message, state, round);
+            }
+
+            if (state.CurrentRoundId == message.RoundId
                 && state.WalletPhase == Constants.WalletPhase.Settled)
             {
                 return await Reject(message, "Round already settled; cannot refund.");
+            }
+
+            if (state.CurrentRoundId == message.RoundId
+                && state.WalletPhase == Constants.WalletPhase.Paying)
+            {
+                return await Reject(message, "Settlement in progress; cannot refund.");
             }
 
             // Dual-trigger: if pending bets exist and betting closed via cancel path before lock.
@@ -123,20 +154,56 @@ namespace DoofTroop.Cancel
                     new RefundResultResponse(message, state, 0m));
             }
 
-            var refundCents = state.LockedStakeCents;
+            // Claim Refunding BEFORE PayWin.
+            state.SettleActionId = message.ActionId;
+            state.PendingWinCents = state.LockedStakeCents;
+            state.LastWinId ??= Guid.NewGuid();
+            state.WalletPhase = Constants.WalletPhase.Refunding;
+            state.LastActionId = message.ActionId;
+            state.RoundStatusSnapshot = round.Status;
+            await _fireworks.SaveGameState(message.GameSession, state);
+
+            state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? state;
+            if (state.WalletPhase != Constants.WalletPhase.Refunding
+                || state.SettleActionId != message.ActionId)
+            {
+                return await Reject(message, "Lost refund race; refund already claimed.");
+            }
+
+            return await CompleteRefundingAsync(message, state, round);
+        }
+
+        private async Task<MessageResult> CompleteRefundingAsync(
+            CancelRoundRequest message,
+            GameState state,
+            RoundRow round)
+        {
+            var refundCents = state.PendingWinCents > 0 ? state.PendingWinCents : state.LockedStakeCents;
+            state.LastWinId ??= Guid.NewGuid();
+
             _logger.Log(
-                $"Refunding cancelled round={message.RoundId} operatorBetId={state.OperatorBetId} cents={refundCents}");
+                $"Refunding cancelled round={message.RoundId} operatorBetId={state.OperatorBetId} cents={refundCents} winId={state.LastWinId}");
 
             // Fireworks game CFs do not expose a dedicated Refund helper in common samples.
             // Returning the locked stake via PayWin restores the player balance through the
             // standard winning integration path. Prefer a native bet-refund API when available.
-            await _fireworks.PayWin(
+            var win = await _fireworks.PayWin(
                 FireballConstants.WinningType.SPIN,
                 state.OperatorBetId,
                 refundCents,
-                message);
+                message,
+                betId: state.FireworksBetId,
+                roundId: state.FireworksRoundId,
+                roundClosed: true,
+                winId: state.LastWinId);
+
+            if (win?.WinId != null)
+            {
+                state.LastWinId = win.WinId;
+            }
 
             state.WalletPhase = Constants.WalletPhase.Refunded;
+            state.PendingWinCents = 0;
             state.Balance += refundCents;
             // Keep board in LastRoundBets so RGS replay still shows the cancelled stake.
             state.LastRoundBets = BetMath.CloneBets(state.LockedBets);

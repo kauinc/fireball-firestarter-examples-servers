@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using DoofTroop.Betting;
 
@@ -11,6 +12,13 @@ namespace DoofTroop
         public string RoundStatusSnapshot;
         public bool? TestMoneyOnly;
 
+        /// <summary>Launch fingerprint — set on auth, checked on wallet mutations.</summary>
+        public string BoundPlayerId;
+        public string BoundGameId;
+        public string BoundEnvironment;
+        public string BoundGameMode;
+        public string BoundCurrency;
+
         public List<PlayerBet> PendingBets = new();
         public List<PlayerBet> LockedBets = new();
         public List<PlayerBet> LastRoundBets = new();
@@ -21,7 +29,10 @@ namespace DoofTroop
 
         public string WalletPhase = Constants.WalletPhase.Idle;
         public string OperatorBetId;
-        public string FireworksRoundId;
+        /// <summary>Fireworks bet id from bet-placed (used in PayWin).</summary>
+        public Guid? FireworksBetId;
+        /// <summary>Fireworks round id from bet-placed (used in PayWin).</summary>
+        public Guid? FireworksRoundId;
         /// <summary>RGS replay id from PlaceBet / win-paid; used by SaveGameStateForReplay.</summary>
         public string LastReplayId;
         public string LastActionId;
@@ -29,6 +40,13 @@ namespace DoofTroop
         public string Currency;
         public string GameMode;
         public long Balance;
+
+        /// <summary>Server hash of locked bets at lock time (client BetsHash ignored).</summary>
+        public string LockedBetsHash;
+
+        public long PendingWinCents;
+        public string SettleActionId;
+        public Guid? LastWinId;
 
         public SettlementResult LastSettlement;
         public List<UndoSnapshot> UndoStack = new();

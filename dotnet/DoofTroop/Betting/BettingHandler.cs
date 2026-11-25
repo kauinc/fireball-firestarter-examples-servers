@@ -1,7 +1,7 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using DoofTroop.Auth;
 using DoofTroop.Messages;
 using DoofTroop.Supabase;
 using Fireball.Fireworks;
@@ -50,17 +50,23 @@ namespace DoofTroop.Betting
                 return await Reject(message, "Missing bet target.");
             }
 
+            if (!BetIntegrity.IsAllowedTargetType(message.Target.Type))
+            {
+                return await Reject(message, "Invalid bet target.");
+            }
+
             if (!BetMode.IsAllowedChipValue(message, message.ChipValue))
             {
                 return await Reject(message, "Invalid chip value.");
             }
 
-            if (message.Target.Type == "combo" && state.ComboPick == null)
+            if (message.Target.Type == Constants.BetTargetTypes.Combo && state.ComboPick == null)
             {
                 return await Reject(message, "Combo pick is required before placing a combo bet.");
             }
 
-            if (message.Target.Type == "crazyCombo" && !BetMath.IsCrazyComboComplete(state.CrazyComboPicks))
+            if (message.Target.Type == Constants.BetTargetTypes.CrazyCombo
+                && !BetMath.IsCrazyComboComplete(state.CrazyComboPicks))
             {
                 return await Reject(message, "Crazy combo picks are incomplete.");
             }
@@ -153,15 +159,21 @@ namespace DoofTroop.Betting
             if (error != null) return error;
 
             PushUndo(state);
+            var allowed = BetMode.AllowedChipFaces(message);
             foreach (var bet in state.PendingBets)
             {
                 bet.Chips = BetMath.MergeChipsForTarget(
                     bet.Target,
-                    bet.Chips.Select(c => new ChipFace
+                    bet.Chips.Select(c =>
                     {
-                        Metal = c.Metal,
-                        Value = BetMath.RoundMoney(c.Value * 2),
-                        Count = c.Count
+                        var doubled = BetMath.RoundMoney(c.Value * 2);
+                        var snapped = BetMode.SnapToNearestFace(allowed, doubled);
+                        return new ChipFace
+                        {
+                            Metal = c.Metal,
+                            Value = snapped,
+                            Count = c.Count
+                        };
                     }));
 
                 var maxDouble = BetMode.MaxBetPerTarget(message);
@@ -195,10 +207,11 @@ namespace DoofTroop.Betting
                 return clone;
             }).ToList();
 
-            if (state.PendingBets.Any(b => BetMath.StackTotal(b.Chips) > BetMode.MaxBetPerTarget(message)))
+            var boardError = BetIntegrity.ValidatePendingBoard(state, message);
+            if (boardError != null)
             {
                 state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
-                return await Reject(message, "Repeated bets exceed max per target.");
+                return await Reject(message, boardError);
             }
 
             MarkPending(state, message.RoundId);
@@ -240,6 +253,11 @@ namespace DoofTroop.Betting
             var (state, error) = await LoadEditableState(message, message.RoundId);
             if (error != null) return error;
 
+            if (!BetIntegrity.IsValidComboPick(message.ComboPick))
+            {
+                return await Reject(message, "Invalid combo pick.");
+            }
+
             PushUndo(state);
             state.ComboPick = message.ComboPick;
             MarkPending(state, message.RoundId);
@@ -251,6 +269,11 @@ namespace DoofTroop.Betting
         {
             var (state, error) = await LoadEditableState(message, message.RoundId);
             if (error != null) return error;
+
+            if (!BetIntegrity.IsValidCrazyComboPicks(message.CrazyComboPicks))
+            {
+                return await Reject(message, "Invalid crazy combo picks.");
+            }
 
             PushUndo(state);
             state.CrazyComboPicks = message.CrazyComboPicks ?? EmptyCrazyPicks();
@@ -264,25 +287,44 @@ namespace DoofTroop.Betting
             var (state, error) = await LoadEditableState(message, message.RoundId);
             if (error != null) return error;
 
+            // Ignore client Bets — only server CarryForwardBets may be restored.
             PushUndo(state);
-            var source = message.Bets?.Count > 0
-                ? message.Bets
-                : state.CarryForwardBets;
+            var source = state.CarryForwardBets ?? new List<PlayerBet>();
 
-            state.PendingBets = (source ?? new List<PlayerBet>()).Select(b =>
+            state.PendingBets = source.Select(b =>
             {
                 var clone = BetMath.CloneBet(b);
                 clone.Id = NextBetId(state);
                 return clone;
             }).ToList();
 
-            if (message.ComboPick != null) state.ComboPick = message.ComboPick;
-            if (message.CrazyComboPicks != null) state.CrazyComboPicks = message.CrazyComboPicks;
+            if (message.ComboPick != null)
+            {
+                if (!BetIntegrity.IsValidComboPick(message.ComboPick))
+                {
+                    state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
+                    return await Reject(message, "Invalid combo pick.");
+                }
 
-            if (state.PendingBets.Any(b => BetMath.StackTotal(b.Chips) > BetMode.MaxBetPerTarget(message)))
+                state.ComboPick = message.ComboPick;
+            }
+
+            if (message.CrazyComboPicks != null)
+            {
+                if (!BetIntegrity.IsValidCrazyComboPicks(message.CrazyComboPicks))
+                {
+                    state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
+                    return await Reject(message, "Invalid crazy combo picks.");
+                }
+
+                state.CrazyComboPicks = message.CrazyComboPicks;
+            }
+
+            var boardError = BetIntegrity.ValidatePendingBoard(state, message);
+            if (boardError != null)
             {
                 state.UndoStack.RemoveAt(state.UndoStack.Count - 1);
-                return await Reject(message, "Carry-forward exceeds max bet per target.");
+                return await Reject(message, boardError);
             }
 
             MarkPending(state, message.RoundId);
@@ -305,26 +347,46 @@ namespace DoofTroop.Betting
                 return (null, await Reject(message, "Round not found."));
             }
 
+            var channelError = RoundAccess.ValidateChannel(round);
+            if (channelError != null)
+            {
+                return (null, await Reject(message, channelError));
+            }
+
             if (!round.IsBettingOpen())
             {
                 return (null, await Reject(message, "Betting is closed for this round."));
             }
 
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            var bindError = SessionGuard.ValidateAndApply(state, message);
+            if (bindError != null)
+            {
+                return (null, await Reject(message, bindError));
+            }
 
+            var testError = RoundAccess.ValidateTestMoney(round, BetMode.IsCoins(message));
+            if (testError != null)
+            {
+                return (null, await Reject(message, testError));
+            }
+
+            // Always block edits while wallet is claimed — regardless of roundId.
             if (state.WalletPhase is Constants.WalletPhase.Locking
                 or Constants.WalletPhase.Locked
-                or Constants.WalletPhase.Settled)
+                or Constants.WalletPhase.Paying
+                or Constants.WalletPhase.Refunding)
             {
-                if (state.CurrentRoundId == roundId)
-                {
-                    return (null, await Reject(message, $"Cannot edit bets in phase {state.WalletPhase}."));
-                }
+                return (null, await Reject(message, $"Cannot edit bets in phase {state.WalletPhase}."));
             }
 
             if (!string.IsNullOrEmpty(state.CurrentRoundId)
                 && state.CurrentRoundId != roundId
-                && state.WalletPhase is Constants.WalletPhase.Pending or Constants.WalletPhase.Idle)
+                && state.WalletPhase is Constants.WalletPhase.Idle
+                    or Constants.WalletPhase.Pending
+                    or Constants.WalletPhase.Settled
+                    or Constants.WalletPhase.Refunded
+                    or Constants.WalletPhase.Rejected)
             {
                 // New betting round — reset board for the new id.
                 state.PendingBets = new List<PlayerBet>();
@@ -333,10 +395,15 @@ namespace DoofTroop.Betting
                 state.CrazyComboPicks = EmptyCrazyPicks();
                 state.WalletPhase = Constants.WalletPhase.Idle;
                 state.OperatorBetId = null;
+                state.FireworksBetId = null;
                 state.FireworksRoundId = null;
                 state.LockedBets = new List<PlayerBet>();
                 state.LockedStakeCents = 0;
+                state.LockedBetsHash = null;
                 state.LastSettlement = null;
+                state.PendingWinCents = 0;
+                state.SettleActionId = null;
+                state.LastWinId = null;
             }
 
             state.CurrentRoundId = roundId;
