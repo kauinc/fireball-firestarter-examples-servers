@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using DoofTroop.Auth;
 using DoofTroop.Betting;
 using DoofTroop.Cancel;
 using DoofTroop.Messages;
@@ -53,6 +55,11 @@ namespace DoofTroop.Lock
             }
 
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            var bindError = SessionGuard.ValidateAndApply(state, message);
+            if (bindError != null)
+            {
+                return await Reject(message, bindError);
+            }
 
             if (state.CurrentRoundId == roundId
                 && state.WalletPhase == Constants.WalletPhase.Locked
@@ -73,6 +80,12 @@ namespace DoofTroop.Lock
                 return MessageResult.SuccessResult("Already settled for round.", message.ActionId);
             }
 
+            if (state.CurrentRoundId == roundId
+                && state.WalletPhase is Constants.WalletPhase.Paying or Constants.WalletPhase.Refunding)
+            {
+                return await Reject(message, $"Cannot lock while {state.WalletPhase}.");
+            }
+
             if (state.CurrentRoundId == roundId && state.WalletPhase == Constants.WalletPhase.Rejected)
             {
                 return await Reject(message, "Bets were rejected for this round.");
@@ -88,10 +101,35 @@ namespace DoofTroop.Lock
                 return await Reject(message, "Lock already in progress for another action.");
             }
 
+            // Block locking a new round while another round still holds wallet claim.
+            if ((state.WalletPhase is Constants.WalletPhase.Locking
+                    or Constants.WalletPhase.Locked
+                    or Constants.WalletPhase.Paying
+                    or Constants.WalletPhase.Refunding)
+                && !string.IsNullOrEmpty(state.CurrentRoundId)
+                && state.CurrentRoundId != roundId)
+            {
+                return await Reject(
+                    message,
+                    $"Cannot lock round {roundId}; wallet busy on {state.CurrentRoundId} ({state.WalletPhase}).");
+            }
+
             var round = await _rounds.GetRoundByIdAsync(roundId);
             if (round == null)
             {
                 return await Reject(message, "Round not found.");
+            }
+
+            var channelError = RoundAccess.ValidateChannel(round);
+            if (channelError != null)
+            {
+                return await Reject(message, channelError);
+            }
+
+            var testError = RoundAccess.ValidateTestMoney(round, BetMode.IsCoins(message));
+            if (testError != null)
+            {
+                return await Reject(message, testError);
             }
 
             if (round.IsCancelled())
@@ -123,6 +161,12 @@ namespace DoofTroop.Lock
                 return await Reject(message, "No pending bets to lock.");
             }
 
+            var boardError = BetIntegrity.ValidatePendingBoard(state, message);
+            if (boardError != null)
+            {
+                return await Reject(message, boardError);
+            }
+
             var totalStake = BetMath.BetsStakeTotal(pending);
             var stakeRgs = BetMode.ToRgsAmount(message, totalStake);
             if (stakeRgs <= 0)
@@ -137,10 +181,25 @@ namespace DoofTroop.Lock
             state.LastActionId = message.ActionId;
             state.LockedBets = BetMath.CloneBets(pending);
             state.LockedStakeCents = stakeRgs;
-            state.Currency = message.Currency ?? state.Currency;
-            state.GameMode = message.GameMode ?? state.GameMode;
+            state.LockedBetsHash = BetIntegrity.ComputeBetsHash(state.LockedBets);
+            state.Currency = state.BoundCurrency ?? message.Currency ?? state.Currency;
+            state.GameMode = state.BoundGameMode ?? message.GameMode ?? state.GameMode;
+            state.FireworksBetId = null;
+            state.FireworksRoundId = null;
+            state.OperatorBetId = null;
+            state.LastWinId = null;
+            state.PendingWinCents = 0;
+            state.SettleActionId = null;
 
             await _fireworks.SaveGameState(message.GameSession, state);
+
+            // Re-check claim after durable Locking write.
+            state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? state;
+            if (state.WalletPhase != Constants.WalletPhase.Locking
+                || state.LastActionId != message.ActionId)
+            {
+                return await Reject(message, "Lost lock race; lock already claimed.");
+            }
 
             _logger.Log($"PlaceBet round={roundId} stakeRgs={stakeRgs} mode={message.GameMode}");
             return await _fireworks.PlaceBet(FireballConstants.BetType.SPIN, stakeRgs, message);
@@ -149,7 +208,19 @@ namespace DoofTroop.Lock
         public async Task<MessageResult> OnBetPlaced(IntegrationBetPlaced message)
         {
             _logger.Log($"bet-placed: {message.ToJson()}");
+
+            var validation = await _fireworks.ValidateMessage(message);
+            if (!validation.IsValid)
+            {
+                return validation.ErrorSentResult;
+            }
+
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            var bindError = SessionGuard.ValidateAndApply(state, message);
+            if (bindError != null)
+            {
+                return await Reject(message, bindError);
+            }
 
             if (state.WalletPhase == Constants.WalletPhase.Locked
                 && state.OperatorBetId == message.OperatorBetId)
@@ -157,15 +228,28 @@ namespace DoofTroop.Lock
                 return await _fireworks.SendMessageToClient(new BetsLockedResponse(message, state));
             }
 
+            if (state.WalletPhase != Constants.WalletPhase.Locking)
+            {
+                return await Reject(message, $"Unexpected bet-placed in phase {state.WalletPhase}.");
+            }
+
+            if (message.Amount != state.LockedStakeCents)
+            {
+                _logger.LogError(
+                    $"bet-placed amount mismatch msg={message.Amount} locked={state.LockedStakeCents}");
+                return await Reject(message, "Bet amount does not match locked stake.");
+            }
+
             state.WalletPhase = Constants.WalletPhase.Locked;
             state.OperatorBetId = message.OperatorBetId;
-            state.FireworksRoundId = message.RoundId?.ToString() ?? state.FireworksRoundId;
+            state.FireworksBetId = message.BetId ?? state.FireworksBetId;
+            state.FireworksRoundId = message.RoundId ?? state.FireworksRoundId;
             if (!string.IsNullOrEmpty(message.ReplayId))
             {
                 state.LastReplayId = message.ReplayId;
             }
             state.Balance = message.Balance;
-            state.Currency = message.Currency ?? state.Currency;
+            state.Currency = state.BoundCurrency ?? message.Currency ?? state.Currency;
             state.PendingBets = new List<PlayerBet>();
             state.UndoStack = new List<UndoSnapshot>();
 
@@ -177,13 +261,16 @@ namespace DoofTroop.Lock
         {
             _logger.LogError($"bet-place-rejected: {message.ToJson()}");
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            SessionGuard.ValidateAndApply(state, message);
 
             state.WalletPhase = Constants.WalletPhase.Rejected;
             state.PendingBets = new List<PlayerBet>();
             state.LockedBets = new List<PlayerBet>();
             state.LockedStakeCents = 0;
             state.OperatorBetId = null;
+            state.FireworksBetId = null;
             state.FireworksRoundId = null;
+            state.LockedBetsHash = null;
             state.UndoStack = new List<UndoSnapshot>();
             if (message.Balance.HasValue)
             {

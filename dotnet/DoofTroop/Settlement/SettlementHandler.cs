@@ -1,6 +1,7 @@
-using System.Collections.Generic;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
+using DoofTroop.Auth;
 using DoofTroop.Betting;
 using DoofTroop.Cancel;
 using DoofTroop.Lock;
@@ -55,6 +56,11 @@ namespace DoofTroop.Settlement
             }
 
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            var bindError = SessionGuard.ValidateAndApply(state, message);
+            if (bindError != null)
+            {
+                return await Reject(message, bindError);
+            }
 
             if (state.CurrentRoundId == message.RoundId
                 && state.WalletPhase == Constants.WalletPhase.Settled
@@ -69,13 +75,25 @@ namespace DoofTroop.Settlement
                         state.Balance));
             }
 
+            // Resume / reject concurrent settle while Paying.
+            if (state.CurrentRoundId == message.RoundId
+                && state.WalletPhase == Constants.WalletPhase.Paying)
+            {
+                if (!string.IsNullOrEmpty(state.SettleActionId)
+                    && state.SettleActionId != message.ActionId)
+                {
+                    return await Reject(message, "Settlement already in progress.");
+                }
+
+                return await CompletePayingAsync(message, state);
+            }
+
             if (state.WalletPhase == Constants.WalletPhase.Rejected
                 && state.CurrentRoundId == message.RoundId)
             {
                 return await Reject(message, "No locked bets — place-bet was rejected.");
             }
 
-            // Early cancel dual-trigger: never settle a cancelled round.
             var earlyRound = await _rounds.GetRoundByIdAsync(message.RoundId);
             if (earlyRound != null && earlyRound.IsCancelled())
             {
@@ -94,8 +112,8 @@ namespace DoofTroop.Settlement
                     return lockResult;
                 }
 
-                // PlaceBet is async via callback; settle must wait for Locked.
                 state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? state;
+                SessionGuard.ValidateAndApply(state, message);
                 if (state.WalletPhase != Constants.WalletPhase.Locked)
                 {
                     return MessageResult.SuccessResult(
@@ -105,6 +123,7 @@ namespace DoofTroop.Settlement
             }
 
             state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? state;
+            SessionGuard.ValidateAndApply(state, message);
 
             if (state.CurrentRoundId != message.RoundId
                 || state.WalletPhase != Constants.WalletPhase.Locked
@@ -118,6 +137,18 @@ namespace DoofTroop.Settlement
             if (round == null)
             {
                 return await Reject(message, "Round not found in Supabase.");
+            }
+
+            var channelError = RoundAccess.ValidateChannel(round);
+            if (channelError != null)
+            {
+                return await Reject(message, channelError);
+            }
+
+            var testError = RoundAccess.ValidateTestMoney(round, BetMode.IsCoins(message));
+            if (testError != null)
+            {
+                return await Reject(message, testError);
             }
 
             if (round.IsCancelled())
@@ -137,6 +168,7 @@ namespace DoofTroop.Settlement
                 return await Reject(message, "Official placements are missing or invalid.");
             }
 
+            // Client ClaimedPlacements / BetsHash are advisory only; payout uses server state.
             if (message.ClaimedPlacements != null && message.ClaimedPlacements.Count > 0)
             {
                 if (!_paytable.PlacementsEqual(message.ClaimedPlacements, official))
@@ -171,25 +203,61 @@ namespace DoofTroop.Settlement
                 settlement.TotalWin = BetMode.FromRgsAmount(message, winRgs);
             }
 
+            // Claim Paying BEFORE PayWin so parallel settles lose the race.
             state.LastSettlement = settlement;
             state.LastActionId = message.ActionId;
+            state.SettleActionId = message.ActionId;
+            state.PendingWinCents = winRgs;
+            state.LastWinId ??= Guid.NewGuid();
             state.RoundStatusSnapshot = round.Status;
             state.TestMoneyOnly = round.TestMoneyOnly;
-            state.GameMode = message.GameMode ?? state.GameMode;
-            // Mark settled after PayWin request is accepted path — store intent first.
+            state.WalletPhase = Constants.WalletPhase.Paying;
             await _fireworks.SaveGameState(message.GameSession, state);
 
-            _logger.Log($"PayWin round={message.RoundId} winRgs={winRgs} mode={message.GameMode}");
-            await _fireworks.PayWin(
+            // Re-read: only the claim owner may PayWin.
+            state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? state;
+            if (state.WalletPhase != Constants.WalletPhase.Paying
+                || state.SettleActionId != message.ActionId)
+            {
+                return await Reject(message, "Lost settlement race; settlement already claimed.");
+            }
+
+            return await CompletePayingAsync(message, state);
+        }
+
+        private async Task<MessageResult> CompletePayingAsync(SettleRoundRequest message, GameState state)
+        {
+            if (state.LastSettlement == null)
+            {
+                return await Reject(message, "Paying state missing settlement snapshot.");
+            }
+
+            var winRgs = state.PendingWinCents;
+            state.LastWinId ??= Guid.NewGuid();
+
+            _logger.Log(
+                $"PayWin round={message.RoundId} winRgs={winRgs} mode={message.GameMode} winId={state.LastWinId}");
+
+            var win = await _fireworks.PayWin(
                 FireballConstants.WinningType.SPIN,
                 state.OperatorBetId,
                 winRgs,
-                message);
+                message,
+                betId: state.FireworksBetId,
+                roundId: state.FireworksRoundId,
+                roundClosed: true,
+                winId: state.LastWinId);
+
+            if (win?.WinId != null)
+            {
+                state.LastWinId = win.WinId;
+            }
 
             state.WalletPhase = Constants.WalletPhase.Settled;
+            state.PendingWinCents = 0;
             state.LastRoundBets = BetMath.CloneBets(state.LockedBets);
             state.CarryForwardBets = state.LockedBets
-                .Where(b => settlement.ById.TryGetValue(b.Id, out var o) && o.Won)
+                .Where(b => state.LastSettlement.ById.TryGetValue(b.Id, out var o) && o.Won)
                 .Select(BetMath.CloneBet)
                 .ToList();
             state.Balance += winRgs;
@@ -202,7 +270,7 @@ namespace DoofTroop.Settlement
             return await _fireworks.SendMessageToClient(
                 new SettleResultResponse(
                     message,
-                    settlement,
+                    state.LastSettlement,
                     state.WalletPhase,
                     state.Balance));
         }
@@ -210,8 +278,43 @@ namespace DoofTroop.Settlement
         public async Task<MessageResult> OnWinConfirmed(IntegrationWinningPaid message)
         {
             _logger.Log($"winning-paid: {message.ToJson()}");
+
+            var validation = await _fireworks.ValidateMessage(message);
+            if (!validation.IsValid)
+            {
+                return validation.ErrorSentResult;
+            }
+
             var state = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+            var bindError = SessionGuard.ValidateAndApply(state, message);
+            if (bindError != null)
+            {
+                _logger.LogError(bindError);
+                return MessageResult.ErrorResult(bindError, message.ActionId);
+            }
+
+            if (state.LastWinId.HasValue
+                && message.WinId.HasValue
+                && state.LastWinId != message.WinId)
+            {
+                _logger.LogError(
+                    $"winning-paid winId mismatch state={state.LastWinId} msg={message.WinId}");
+                return MessageResult.ErrorResult("Win id mismatch.", message.ActionId);
+            }
+
+            if (!string.IsNullOrEmpty(state.OperatorBetId)
+                && !string.IsNullOrEmpty(message.OperatorBetId)
+                && !string.Equals(state.OperatorBetId, message.OperatorBetId, StringComparison.Ordinal))
+            {
+                return MessageResult.ErrorResult("Operator bet id mismatch.", message.ActionId);
+            }
+
             state.Balance = message.Balance;
+            if (message.WinId.HasValue)
+            {
+                state.LastWinId = message.WinId;
+            }
+
             await ReplayPersistence.SaveAsync(
                 _fireworks,
                 message.GameSession,

@@ -46,6 +46,14 @@ namespace DoofTroop.Auth
                         await _fireworks.CloseGameSession(gameSession.Id);
                     }
                 }
+
+                // Re-bind launch fingerprint on resume so later handlers can validate.
+                var existing = await _fireworks.GetGameState<GameState>(message.GameSession) ?? new GameState();
+                SessionGuard.ApplyBindFromSession(existing, message);
+                existing.Balance = message.Balance;
+                existing.Currency = message.Currency ?? existing.BoundCurrency ?? existing.Currency;
+                existing.GameMode = message.GameMode ?? existing.BoundGameMode ?? existing.GameMode;
+                await _fireworks.SaveGameState(message.GameSession, existing);
             }
 
             if (message.GameSession == null)
@@ -57,6 +65,7 @@ namespace DoofTroop.Auth
                     GameMode = message.GameMode,
                     WalletPhase = Constants.WalletPhase.Idle
                 };
+                SessionGuard.ApplyBindFromSession(defaultGameState, message);
 
                 var gameSession = await _fireworks.CreatePermanentGameSession(defaultGameState, message);
                 message.UpdateGameSession(gameSession);

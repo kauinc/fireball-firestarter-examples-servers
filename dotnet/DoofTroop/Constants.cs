@@ -42,9 +42,36 @@ namespace DoofTroop
             public const string Pending = "Pending";
             public const string Locking = "Locking";
             public const string Locked = "Locked";
+            public const string Paying = "Paying";
             public const string Settled = "Settled";
+            public const string Refunding = "Refunding";
             public const string Refunded = "Refunded";
             public const string Rejected = "Rejected";
+        }
+
+        public static class ComboKinds
+        {
+            public const string Colors = "colors";
+            public const string Patterns = "patterns";
+            public const string Accessories = "accessories";
+
+            public static readonly string[] All = { Colors, Patterns, Accessories };
+        }
+
+        public static class BetTargetTypes
+        {
+            public const string Doof = "doof";
+            public const string Split = "split";
+            public const string Pattern = "pattern";
+            public const string Color = "color";
+            public const string Accessory = "accessory";
+            public const string Combo = "combo";
+            public const string CrazyCombo = "crazyCombo";
+
+            public static readonly string[] All =
+            {
+                Doof, Split, Pattern, Color, Accessory, Combo, CrazyCombo
+            };
         }
 
         public static class Places
