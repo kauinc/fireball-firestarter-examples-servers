@@ -7,7 +7,6 @@ namespace LuckyWheel
         public const string JackpotTemplateId = "92d5b3f8-595e-4eda-a417-2df52ac9e4f0";
         public const float JackpotContributionPercent = 0.5f;
         public const long DefaultBet = 100;
-        public const int SectorsCount = 8;
 
         public static readonly Dictionary<Symbol, float> SymbolPayouts = new()
         {

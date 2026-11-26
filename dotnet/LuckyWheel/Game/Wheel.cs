@@ -94,7 +94,7 @@ namespace LuckyWheel
             {
                 // generate random result and calculate winning
                 winSymbol = await GetRandomResult();
-                winAmount = CalculateWinAmount(gameState.Symbol, gameState.BetAmount);
+                winAmount = CalculateWinAmount(winSymbol, message.Amount);
             }
 
             _logger.Log($"spin: winSymbol = {winSymbol}");
