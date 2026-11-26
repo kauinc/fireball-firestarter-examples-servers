@@ -41,62 +41,97 @@ namespace LuckyWheel
         public async Task<MessageResult> TrySpin(SpinRequest message)
         {
             _logger.Log($"spin: request = {message.ToJson()}");
-            
-            // generate random result
-            var symbol = await GetRandomResult(GameConst.SectorsCount);
-            _logger.Log($"spin: symbol = {symbol}");
-            
+
             // updating game state
             var gameState = await _fireworks.GetGameState<WheelGameState>(message.GameSession);
-            
+
             gameState.IsSpinning = true;
             gameState.BetAmount = message.BetAmount;
-            gameState.Symbol = symbol;
 
-            await _fireworks.SaveGameState(message.GameSession, gameState);
-            
             // calculate planned contribution to jackpot
-            var contribution = new JackpotContribution()
-            {
-                Id = GameConst.JackpotTemplateId,
-                Contribution = CalculateContribution(message.BetAmount),
-            };
+            gameState.JackpotContribution = CalculateContribution(message.BetAmount);
             
-            // send a bet place message to integration
+            await _fireworks.SaveGameState(message.GameSession, gameState);
+
+            // send a bet place message to integration with jackpot contributions
             _logger.Log($"spin: betAmount = {message.BetAmount} {message.Currency}");
             return await _fireworks.PlaceBet(
                 FireballConstants.BetType.SPIN,
                 gameState.BetAmount,
                 message,
-                jackpotContributions: new List<JackpotContribution>() { contribution });
+                jackpotContributions: new List<JackpotContribution>()
+                {
+                    new()
+                    {
+                        Id = GameConst.JackpotTemplateId,
+                        Contribution = gameState.JackpotContribution,
+                    }
+                });
         }
-        
+
         public async Task<MessageResult> OnBetPlaced(IntegrationBetPlaced message)
         {
             _logger.Log($"spin: betPlaced = {message.ToJson()}");
             var gameState = await _fireworks.GetGameState<WheelGameState>(message.GameSession);
             
-            // contribute to jackpot
-            var contribution = CalculateContribution(message.Amount);
-            var result = await _jackpots.Contribute(GameConst.JackpotTemplateId, contribution, message);
-            _logger.Log($"spin: jackpot contribution = {result.ContributionAmount} {result.PlayerCurrency}");
-            _logger.Log($"spin: jackpot value = {result.NewJackpotAmount} {result.PlayerCurrency}");
+            // contribute to the jackpot and try to win it
+            var jackpotResult = await _jackpots.ContributeAndGetOutcome(
+                GameConst.JackpotTemplateId, 
+                gameState.JackpotContribution, 
+                message);
             
-            // calculate winning
-            var multiplier = CalculateMultiplier(gameState.Symbol);
-            var winAmount = (long)(gameState.BetAmount * multiplier);
-            _logger.Log($"spin: multiplier = {multiplier}");
+            _logger.Log($"spin: jackpot value = {jackpotResult.NewJackpotAmount} {message.Currency}");
+
+            long winAmount;
+            Symbol winSymbol;
+            if (jackpotResult.Won)
+            {
+                // set jackpot win
+                winSymbol = Symbol.Jackpot;
+                winAmount = jackpotResult.AmountWon;
+            }
+            else
+            {
+                // generate random result and calculate winning
+                winSymbol = await GetRandomResult();
+                winAmount = CalculateWinAmount(gameState.Symbol, gameState.BetAmount);
+            }
+
+            _logger.Log($"spin: winSymbol = {winSymbol}");
+            _logger.Log($"spin: winAmount = {winAmount} {message.Currency}");
 
             // updating game state
             gameState.IsSpinning = false;
+            gameState.Symbol = winSymbol;
             gameState.WinAmount = winAmount;
             gameState.Balance = message.Balance + winAmount;
             
             await _fireworks.SaveGameState(message.GameSession, gameState);
-            
-            // send a pay win message to integration
-            _logger.Log($"spin: winAmount = {winAmount} {message.Currency}");
-            await _fireworks.PayWin(FireballConstants.BetType.SPIN, message.OperatorBetId, winAmount, message);
+
+            if (jackpotResult.Won)
+            {
+                // send a pay jackpot message to integration
+                var jackpotEntry = new JackpotEntry()
+                {
+                    Amount = jackpotResult.AmountWon,
+                    Savings = jackpotResult.Savings,
+                    JackpotId = jackpotResult.JackpotId,
+                    TemplateId = jackpotResult.TemplateId,
+                };
+                await _fireworks.PayJackpot(
+                    new List<JackpotEntry>() { jackpotEntry }, 
+                    message.OperatorBetId, 
+                    message);
+            }
+            else
+            {
+                // send a pay win message to integration
+                await _fireworks.PayWin(
+                    FireballConstants.BetType.SPIN, 
+                    message.OperatorBetId, 
+                    winAmount, 
+                    message);
+            }
 
             // send the spin result message to the game client
             var response = new SpinResult(gameState, message);
@@ -112,6 +147,7 @@ namespace LuckyWheel
             
             gameState.IsSpinning = false;
             gameState.WinAmount = 0;
+            gameState.JackpotContribution = 0;
             
             await _fireworks.SaveGameState(message.GameSession, gameState);
             
@@ -133,24 +169,28 @@ namespace LuckyWheel
 
         public async Task<MessageResult> OnWinJackpotConfirmed(IntegrationJackpotPaid message)
         {
-            _logger.Log($"jackpot-paid: {message.ToJson()}");
+            _logger.Log($"jackpot paid: {message.ToJson()}");
             return MessageResult.SuccessResult("Jackpot Win confirmed", message.ActionId);
         }
 
         public async Task<MessageResult> OnWinJackpotRejected(ErrorMessage message)
         {
-            _logger.Log($"jackpot-pay-rejected: {message.ToJson()}");
+            _logger.Log($"jackpot pay rejected: {message.ToJson()}");
             return MessageResult.ErrorResult("Jackpot pay rejected", message.ActionId);
         }
 
-        private async Task<Symbol> GetRandomResult(int reelsCount)
+        private async Task<Symbol> GetRandomResult()
         {
-            return (Symbol)(await _fireballRng.NextInt(0, reelsCount));
+            var symbols = GameConst.SymbolWeights.Keys.ToList();
+            var weights = GameConst.SymbolWeights.Values.ToList();
+            var index = await _fireballRng.IndexByWeights(weights);
+
+            return symbols[index];
         }
         
-        private float CalculateMultiplier(Symbol symbol)
+        private long CalculateWinAmount(Symbol symbol, long betAmount)
         {
-            return GameConst.SymbolPayouts[symbol];
+            return (long)(GameConst.SymbolPayouts[symbol] * betAmount);
         }
 
         private long CalculateContribution(long betAmount)

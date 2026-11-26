@@ -11,14 +11,24 @@ namespace LuckyWheel
 
         public static readonly Dictionary<Symbol, float> SymbolPayouts = new()
         {
-            { Symbol.Blueberry, 2.0f },
-            { Symbol.Lemon, 2.0f },
-            { Symbol.Plum, 3.0f },
-            { Symbol.Orange, 3.0f },
-            { Symbol.Strawberry, 4.0f },
-            { Symbol.Cherry, 5.0f },
-            { Symbol.Banana, 5.0f },
-            { Symbol.Watermelon, 7.0f },
+            { Symbol.Tomato, 0.0f },
+            { Symbol.Lemon, 0.0f },
+            { Symbol.Clover, 1.0f },
+            { Symbol.Cherry, 2.0f },
+            { Symbol.Bell, 3.0f },
+            { Symbol.Star, 5.0f },
+            { Symbol.Diamond, 10.0f },
+        };
+        
+        public static readonly Dictionary<Symbol, double> SymbolWeights = new()
+        {
+            { Symbol.Tomato, 0.33f },
+            { Symbol.Lemon, 0.25f },
+            { Symbol.Clover, 0.17f },
+            { Symbol.Cherry, 0.12f },
+            { Symbol.Bell, 0.08f },
+            { Symbol.Star, 0.04f },
+            { Symbol.Diamond, 0.01f },
         };
     }
 }

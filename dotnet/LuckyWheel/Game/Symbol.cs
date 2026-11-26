@@ -2,13 +2,13 @@ namespace LuckyWheel
 {
     public enum Symbol
     {
-        Watermelon = 0,
-        Blueberry = 1,
-        Lemon = 2,
-        Plum = 3,
-        Orange = 4,
-        Strawberry = 5,
+        Jackpot = 0,
+        Tomato = 1,
+        Diamond = 2,
+        Star = 3,
+        Bell = 4,
+        Lemon = 5,
         Cherry = 6,
-        Banana = 7,
+        Clover = 7,
     }
 }
